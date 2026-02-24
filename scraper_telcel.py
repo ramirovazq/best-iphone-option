@@ -45,7 +45,7 @@ def scrape_detalle(page, url_detalle: str, marca: str, csv_path: Path) -> bool:
     Devuelve True si se pudo extraer y guardar.
     """
     page.goto(url_detalle, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_load_state("networkidle", timeout=15000)
+    time.sleep(2)
 
     # Selectores habituales en páginas de detalle: título del producto y precio
     modelo = ""
@@ -96,6 +96,7 @@ def main() -> None:
     )
     parser.add_argument("--csv", "-o", default=CSV_DEFAULT, help=f"Archivo CSV de salida (default: {CSV_DEFAULT})")
     parser.add_argument("--no-headless", action="store_true", help="Mostrar ventana del navegador (por defecto va en segundo plano)")
+    parser.add_argument("--debug", action="store_true", help="Guardar capturas y pausas para depurar")
     args = parser.parse_args()
 
     csv_path = Path(args.csv)
@@ -112,59 +113,133 @@ def main() -> None:
 
         try:
             page.goto(URL_COMPARADOR, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=15000)
+            # No usar networkidle: la página suele tener peticiones continuas. Esperamos al contenido visible.
+            time.sleep(2)
+            # Estructura real: texto "Selecciona un equipo para comparar." y debajo 3 divs:
+            # .cx-compare-izq, .cx-compare-der, .cx-compare-item-hide. Usamos el primer bloque visible.
+            page.get_by_text("Selecciona un equipo para comparar", exact=False).first.wait_for(state="visible", timeout=10000)
+            compare_item = page.locator(".cx-compare-izq").first
+            if not compare_item.count():
+                compare_item = page.locator(".cx-compare-item:not(.cx-compare-item-hide)").first
+            compare_item.wait_for(state="visible", timeout=5000)
+            compare_item.scroll_into_view_if_needed()
+            comparador = page  # para compatibilidad con el resto del script
+            marca_label = compare_item.get_by_text("Marca", exact=True).first
+            if not marca_label.count():
+                marca_label = page.get_by_text("Marca", exact=True).first
 
-            # Selector de MARCA (primer bloque del comparador)
-            # La página tiene dos columnas; usamos la primera para "Marca" y "Modelo"
-            marca_label = page.get_by_text("Marca", exact=True).first
-            # Ir al contenedor del comparador y abrir el dropdown de marca
-            comparador = page.locator("[class*='comparador'], [class*='comparison']").first
-            if not comparador.count():
-                comparador = page.locator("main").first
-            if not comparador.count():
-                comparador = page
-
-            # Abrir dropdown Marca: clic en el input/trigger que muestra "Elige una..."
-            marca_trigger = comparador.get_by_placeholder(re.compile("elige una", re.I)).first
+            # Dentro del bloque .cx-compare-izq (o el visible) hay "elige una opción": primer input = Marca
+            marca_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).first
             if not marca_trigger.count():
-                marca_trigger = comparador.locator("button, [role='combobox'], [role='listbox']").first
+                marca_trigger = compare_item.locator("input[placeholder*='opcion'], input[placeholder*='opción']").first
             if not marca_trigger.count():
-                # Fallback: primer clickable cerca del texto "Marca"
-                marca_trigger = marca_label.locator("..").locator("button, input, [tabindex='0']").first
+                marca_trigger = compare_item.locator("input").first
+            if not marca_trigger.count():
+                if args.debug:
+                    page.screenshot(path="debug_error_sin_trigger_marca.png")
+                raise RuntimeError(
+                    "No se encontró el selector de Marca dentro de .cx-compare-izq. Ejecuta con --debug."
+                )
 
-            marca_trigger.click()
-            time.sleep(0.8)
+            marca_buscada = args.marca.strip()
+            marca_label.scroll_into_view_if_needed()
+            time.sleep(0.5)
+            if args.debug:
+                page.screenshot(path="debug_01_antes_dropdown_marca.png")
+                print("Debug: captura guardada en debug_01_antes_dropdown_marca.png")
 
-            # Seleccionar la marca indicada
-            opcion_marca = page.get_by_text(args.marca, exact=True).first
+            # Abrir dropdown: ng-select suele abrir al hacer clic en el contenedor .ng-select (no solo el input)
+            def _abrir_dropdown_marca():
+                try:
+                    # Intentar clic en el contenedor .ng-select del primer bloque (marca)
+                    ng_select = compare_item.locator(".ng-select").first
+                    if ng_select.count():
+                        ng_select.scroll_into_view_if_needed()
+                        ng_select.click(force=True)
+                        return True
+                except Exception:
+                    pass
+                try:
+                    marca_trigger.evaluate("el => { el.focus(); el.click(); }")
+                    return True
+                except Exception:
+                    pass
+                try:
+                    marca_trigger.click(force=True)
+                    return True
+                except Exception:
+                    pass
+                return False
+
+            for intento in range(3):
+                _abrir_dropdown_marca()
+                time.sleep(1)
+                panel = page.locator(".ng-dropdown-panel, .ng-select-bottom").first
+                try:
+                    panel.wait_for(state="visible", timeout=4000)
+                    break
+                except Exception:
+                    if intento == 2:
+                        raise RuntimeError(
+                            "El dropdown de marca no se abrió después de 3 intentos. "
+                            "Prueba con --no-headless y --debug para ver la página."
+                        )
+            if args.debug:
+                page.screenshot(path="debug_02_despues_abrir_marca.png")
+                print("Debug: captura guardada en debug_02_despues_abrir_marca.png")
+
+            # Opción dentro del panel (o cualquier .ng-option visible con la marca)
+            opcion_marca = panel.locator(".ng-option").filter(has_text=re.compile(re.escape(marca_buscada), re.I)).first
             if not opcion_marca.count():
-                opcion_marca = page.get_by_role("option").filter(has_text=args.marca).first
+                opcion_marca = panel.locator(".ng-option").get_by_text(marca_buscada, exact=True).first
             if not opcion_marca.count():
-                opcion_marca = page.locator(f"li:has-text('{args.marca}'), div:has-text('{args.marca}')").first
-            opcion_marca.click()
+                opcion_marca = panel.locator(".ng-option").get_by_text(marca_buscada.upper(), exact=True).first
+            if not opcion_marca.count():
+                opcion_marca = page.locator(".ng-option").filter(has_text=re.compile(re.escape(marca_buscada), re.I)).first
+            if not opcion_marca.count():
+                raise RuntimeError(f"No se encontró la opción de marca '{marca_buscada}' en .ng-option.")
+            opcion_marca.click(force=True)
             time.sleep(1.2)
 
-            # Abrir dropdown Modelo
-            modelo_trigger = comparador.get_by_placeholder(re.compile("elige|modelo", re.I)).first
+            # Dentro del mismo compare_item, segundo "elige una opción" = Modelo
+            modelo_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).nth(1)
             if not modelo_trigger.count():
-                modelo_trigger = comparador.get_by_text("Modelo", exact=True).locator("..").locator("button, input, [role='combobox']").first
+                modelo_trigger = compare_item.locator("input[placeholder*='opcion'], input[placeholder*='opción']").nth(1)
             if not modelo_trigger.count():
-                modelo_trigger = comparador.locator("button, [role='combobox']").nth(1)
-            modelo_trigger.click()
+                modelo_trigger = compare_item.locator("input").nth(1)
+            modelo_trigger.scroll_into_view_if_needed()
+            modelo_trigger.click(force=True)
             time.sleep(0.8)
 
             def seleccionar_modelo_y_extraer(nombre_modelo: str) -> bool:
-                """Abre dropdown modelo, selecciona nombre_modelo, abre 'ver detalles' y guarda en CSV."""
-                modelo_trigger.click()
-                time.sleep(0.8)
-                op = page.get_by_text(nombre_modelo, exact=True).first
+                """Abre dropdown modelo (segundo .ng-select), selecciona nombre_modelo, abre 'ver detalles' y guarda en CSV."""
+                for _ in range(3):
+                    try:
+                        ng_select_modelo = compare_item.locator(".ng-select").nth(1)
+                        if ng_select_modelo.count():
+                            ng_select_modelo.scroll_into_view_if_needed()
+                            ng_select_modelo.click(force=True)
+                        else:
+                            modelo_trigger.click(force=True)
+                    except Exception:
+                        modelo_trigger.click(force=True)
+                    time.sleep(1)
+                    panel_modelo = page.locator(".ng-dropdown-panel, .ng-select-bottom").first
+                    try:
+                        panel_modelo.wait_for(state="visible", timeout=4000)
+                        break
+                    except Exception:
+                        pass
+                else:
+                    return False
+                op = panel_modelo.locator(".ng-option").filter(has_text=re.compile(re.escape(nombre_modelo), re.I)).first
                 if not op.count():
-                    op = page.get_by_role("option").filter(has_text=nombre_modelo).first
+                    op = panel_modelo.locator(".ng-option").get_by_text(nombre_modelo, exact=True).first
                 if not op.count():
-                    op = page.locator(f"li:has-text('{nombre_modelo}'), div:has-text('{nombre_modelo}')").first
+                    op = page.locator(".ng-option").filter(has_text=re.compile(re.escape(nombre_modelo), re.I)).first
                 if not op.count():
                     return False
-                op.click()
+                op.click(force=True)
                 time.sleep(1.5)
 
                 ver_detalles = page.get_by_role("link", name=re.compile("ver detalles", re.I)).first
@@ -190,22 +265,31 @@ def main() -> None:
                 if not seleccionar_modelo_y_extraer(args.modelo):
                     print(f"No se encontró el modelo '{args.modelo}' o el botón 'ver detalles'.")
             else:
-                # Obtener lista de modelos: abrir dropdown y leer opciones
-                modelo_trigger.click()
-                time.sleep(0.8)
-                opciones = page.locator("[role='option'], li[class*='option'], div[class*='option']").all()
-                if not opciones:
-                    opciones = page.locator("ul li, [role='listbox'] > *").all()
+                # Obtener lista de modelos: abrir segundo .ng-select, leer .ng-option del panel
+                for _ in range(3):
+                    try:
+                        compare_item.locator(".ng-select").nth(1).click(force=True)
+                    except Exception:
+                        modelo_trigger.click(force=True)
+                    time.sleep(1)
+                    panel_modelos = page.locator(".ng-dropdown-panel, .ng-select-bottom").first
+                    try:
+                        panel_modelos.wait_for(state="visible", timeout=4000)
+                        break
+                    except Exception:
+                        pass
+                else:
+                    raise RuntimeError("No se pudo abrir el dropdown de modelo.")
+                opciones = panel_modelos.locator(".ng-option").all()
                 textos_modelos = []
                 for op in opciones:
                     try:
-                        if op.is_visible():
-                            t = op.inner_text().strip()
-                            if t and t != args.marca and t not in textos_modelos:
-                                textos_modelos.append(t)
+                        t = op.inner_text().strip()
+                        if t and t != marca_buscada and t not in textos_modelos:
+                            textos_modelos.append(t)
                     except Exception:
                         continue
-                page.keyboard.press("Escape")  # Cerrar dropdown
+                page.keyboard.press("Escape")
                 time.sleep(0.3)
                 if not textos_modelos:
                     print("No se encontraron modelos para esta marca. Prueba --modelo con un nombre exacto.")
@@ -215,17 +299,25 @@ def main() -> None:
                 for nombre_modelo in textos_modelos:
                     if seleccionar_modelo_y_extraer(nombre_modelo):
                         page.goto(URL_COMPARADOR, wait_until="domcontentloaded", timeout=30000)
-                        page.wait_for_load_state("networkidle", timeout=15000)
-                        # Re-abrir marca y modelo para el siguiente
-                        marca_trigger = comparador.get_by_placeholder(re.compile("elige una", re.I)).first
+                        time.sleep(2)
+                        # Re-obtener bloque comparador y selectores
+                        compare_item = page.locator(".cx-compare-izq").first
+                        if not compare_item.count():
+                            compare_item = page.locator(".cx-compare-item:not(.cx-compare-item-hide)").first
+                        marca_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).first
+                        if not marca_trigger.count():
+                            marca_trigger = compare_item.locator("input").first
                         if marca_trigger.count():
-                            marca_trigger.click()
-                            time.sleep(0.5)
-                            opcion_marca.click()
+                            marca_trigger.scroll_into_view_if_needed()
+                            marca_trigger.click(force=True)
                             time.sleep(1)
-                        modelo_trigger = comparador.get_by_placeholder(re.compile("elige|modelo", re.I)).first
+                            panel = page.locator(".ng-dropdown-panel").first
+                            panel.wait_for(state="visible", timeout=5000)
+                            panel.locator(".ng-option").filter(has_text=re.compile(re.escape(marca_buscada), re.I)).first.click(force=True)
+                            time.sleep(1)
+                        modelo_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).nth(1)
                         if not modelo_trigger.count():
-                            modelo_trigger = comparador.locator("button, [role='combobox']").nth(1)
+                            modelo_trigger = compare_item.locator("input").nth(1)
                     else:
                         print(f"  Omitido (no detalles): {nombre_modelo}")
 
