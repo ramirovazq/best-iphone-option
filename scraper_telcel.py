@@ -45,7 +45,7 @@ def scrape_detalle(page, url_detalle: str, marca: str, csv_path: Path) -> bool:
     Devuelve True si se pudo extraer y guardar.
     """
     page.goto(url_detalle, wait_until="domcontentloaded", timeout=30000)
-    time.sleep(2)
+    time.sleep(10)
 
     # Selectores habituales en páginas de detalle: título del producto y precio
     modelo = ""
@@ -58,6 +58,7 @@ def scrape_detalle(page, url_detalle: str, marca: str, csv_path: Path) -> bool:
 
     # Precio: suele estar en [data-testid="price"], .price, o similar
     for selector in [
+        ".product-summary",
         '[data-testid*="price"]',
         '[data-testid*="precio"]',
         ".price",
