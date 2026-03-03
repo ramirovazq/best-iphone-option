@@ -59,12 +59,6 @@ def scrape_detalle(page, url_detalle: str, marca: str, csv_path: Path) -> bool:
     # Precio: suele estar en [data-testid="price"], .price, o similar
     for selector in [
         ".product-summary",
-        '[data-testid*="price"]',
-        '[data-testid*="precio"]',
-        ".price",
-        ".precio",
-        "[class*='price']",
-        "[class*='Price']",
     ]:
         try:
             el = page.locator(selector).first
