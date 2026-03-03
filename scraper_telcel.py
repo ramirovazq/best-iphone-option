@@ -212,52 +212,79 @@ def main() -> None:
             time.sleep(0.8)
 
             def seleccionar_modelo_y_extraer(nombre_modelo: str) -> bool:
-                """Abre dropdown modelo (segundo .ng-select), selecciona nombre_modelo, abre 'ver detalles' y guarda en CSV."""
+                """Abre dropdown modelo, selecciona nombre_modelo, abre 'ver detalles' y guarda en CSV."""
                 for _ in range(3):
                     try:
-                        ng_select_modelo = compare_item.locator(".ng-select").nth(1)
-                        if ng_select_modelo.count():
-                            ng_select_modelo.scroll_into_view_if_needed()
-                            ng_select_modelo.click(force=True)
-                        else:
-                            modelo_trigger.click(force=True)
+                        compare_item.locator(".ng-select").nth(1).scroll_into_view_if_needed()
+                        compare_item.locator(".ng-select").nth(1).click(force=True)
                     except Exception:
                         modelo_trigger.click(force=True)
                     time.sleep(1)
-                    panel_modelo = page.locator(".ng-dropdown-panel, .ng-select-bottom").first
                     try:
-                        panel_modelo.wait_for(state="visible", timeout=4000)
-                        break
+                        page.wait_for_selector(".ng-dropdown-panel .ng-option", state="visible", timeout=5000)
+                        panel_modelo = page.locator(".ng-dropdown-panel").last
+                        if panel_modelo.locator(".ng-option").count() > 0:
+                            break
                     except Exception:
                         pass
+                    panel_modelo = page.locator(".ng-dropdown-panel").first
+                    if panel_modelo.locator(".ng-option").count() > 0:
+                        break
                 else:
                     return False
+                time.sleep(0.5)
+
                 op = panel_modelo.locator(".ng-option").filter(has_text=re.compile(re.escape(nombre_modelo), re.I)).first
                 if not op.count():
-                    op = panel_modelo.locator(".ng-option").get_by_text(nombre_modelo, exact=True).first
+                    op = panel_modelo.locator(".ng-option").get_by_text(nombre_modelo, exact=False).first
+                if not op.count():
+                    palabras = nombre_modelo.split()
+                    if len(palabras) >= 2:
+                        regex_flex = re.compile(
+                            r".*".join(re.escape(p) for p in palabras),
+                            re.I | re.DOTALL
+                        )
+                        op = panel_modelo.locator(".ng-option").filter(has_text=regex_flex).first
+                    else:
+                        op = panel_modelo.locator(".ng-option").get_by_text(nombre_modelo, exact=True).first
                 if not op.count():
                     op = page.locator(".ng-option").filter(has_text=re.compile(re.escape(nombre_modelo), re.I)).first
                 if not op.count():
                     return False
                 op.click(force=True)
-                time.sleep(1.5)
+                time.sleep(8)
 
-                ver_detalles = page.get_by_role("link", name=re.compile("ver detalles", re.I)).first
-                if not ver_detalles.count():
-                    ver_detalles = page.get_by_role("button", name=re.compile("ver detalles", re.I)).first
-                if not ver_detalles.count():
-                    ver_detalles = page.get_by_text(re.compile("ver detalles", re.I)).first
-                if not ver_detalles.count() or not ver_detalles.is_visible():
+                print("[ver detalles] Buscando bloque .cx-compare-content...")
+                compare_content = compare_item.locator(".cx-compare-content").first
+                if not compare_content.count():
+                    compare_content = page.locator(".cx-compare-content").first
+                    print("[ver detalles] compare_content no en compare_item, usando page.")
+                try:
+                    compare_content.wait_for(state="visible", timeout=10000)
+                    print("[ver detalles] .cx-compare-content visible.")
+                except Exception as e:
+                    print(f"[ver detalles] .cx-compare-content no apareció (timeout o no existe): {e}")
+                    if args.debug:
+                        page.screenshot(path="debug_ver_detalles_sin_compare_content.png")
                     return False
+                compare_content.scroll_into_view_if_needed()
+                if args.debug:
+                    page.screenshot(path="debug_03_antes_buscar_ver_detalles.png")
+                    print("Debug: captura debug_03_antes_buscar_ver_detalles.png")
 
-                href = ver_detalles.get_attribute("href")
-                if href and not href.startswith("http"):
-                    from urllib.parse import urljoin
-                    href = urljoin(URL_COMPARADOR, href)
-                if href:
-                    return scrape_detalle(page, href, args.marca, csv_path)
-                ver_detalles.click()
-                time.sleep(2)
+                time.sleep(5)
+                print("debug ramiro ...5 segs")
+
+                boton = page.locator("button:has-text('Ver detalles')")
+                boton.wait_for(state="visible")
+                boton.click()
+                print("debug ramiro ... ver_detalles_button", boton)
+                time.sleep(5)
+
+                page.screenshot(path="debug_04_despues_click_ver_detalles.png")
+                print("Debug: captura debug_04_despues_click_ver_detalles.png")
+
+
                 return scrape_detalle(page, page.url, args.marca, csv_path)
             # ---
 
