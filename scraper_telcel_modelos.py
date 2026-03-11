@@ -27,14 +27,14 @@ def ensure_csv_header(csv_path: Path) -> None:
     """Crea el CSV con cabecera si no existe."""
     if not csv_path.exists():
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f, separator=";")
+            w = csv.writer(f, delimiter=";")
             w.writerow(["marca", "modelo"])
 
 
 def append_row(csv_path: Path, marca: str, modelo: str) -> None:
     """Añade una fila (marca, modelo) al CSV."""
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f, separator=";").writerow([marca, modelo])
+        csv.writer(f, delimiter=";").writerow([marca, modelo])
 
 
 def main() -> None:
