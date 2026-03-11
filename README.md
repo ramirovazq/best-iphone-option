@@ -29,19 +29,31 @@ playwright install chromium
 
 ## Uso
 
-```bash
+### Listar todos los modelos de una marca (`scraper_telcel_modelos.py`)
 
+Genera un CSV con columnas `marca, modelo` (un renglón por modelo). Sirve como entrada para procesar después con `scraper_telcel.py`.
+
+```bash
+uv run python scraper_telcel_modelos.py --marca "Apple" --csv modelos_apple.csv
+
+# Ver el navegador
+uv run python scraper_telcel_modelos.py --marca "Apple" --csv modelos_apple.csv --no-headless
+```
+
+### Extraer precios (`scraper_telcel.py`)
+
+```bash
 # Una marca y modelo específico
-$ uv run python scraper_telcel.py --marca "Apple" --modelo "iPhone 16 Plus 128GB" --no-headless --debug
+uv run python scraper_telcel.py --marca "Apple" --modelo "iPhone 16 Plus 128GB" --no-headless --debug
 
 # Una marca y todos sus modelos (recomendado la primera vez)
-python scraper_telcel.py --marca "Apple" --csv equipos_apple.csv
+uv run python scraper_telcel.py --marca "Apple" --csv equipos_apple.csv
 
 # Una marca y un modelo concreto
-python scraper_telcel.py --marca "Apple" --modelo "iPhone 16" --csv resultado.csv
+uv run python scraper_telcel.py --marca "Apple" --modelo "iPhone 16" --csv resultado.csv
 
 # Ver el navegador (útil para depurar)
-python scraper_telcel.py --marca "Samsung" --no-headless
+uv run python scraper_telcel.py --marca "Samsung" --no-headless
 ```
 
 ### Parámetros
