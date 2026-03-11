@@ -30,6 +30,10 @@ playwright install chromium
 ## Uso
 
 ```bash
+
+# Una marca y modelo específico
+$ uv run python scraper_telcel.py --marca "Apple" --modelo "iPhone 16 Plus 128GB" --no-headless --debug
+
 # Una marca y todos sus modelos (recomendado la primera vez)
 python scraper_telcel.py --marca "Apple" --csv equipos_apple.csv
 

@@ -21,14 +21,14 @@ def ensure_csv_header(csv_path: Path) -> None:
     """Crea el CSV con cabecera si no existe."""
     if not csv_path.exists():
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
+            w = csv.writer(f, separator=";")
             w.writerow(["marca", "modelo", "precio", "url_detalle"])
 
 
 def append_row(csv_path: Path, marca: str, modelo: str, precio: str, url_detalle: str) -> None:
     """Añade una fila al CSV."""
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([marca, modelo, precio, url_detalle])
+        csv.writer(f,separator=";").writerow([marca, modelo, precio, url_detalle])
 
 
 def normalizar_precio(texto: str) -> str:
