@@ -80,6 +80,31 @@ def scrape_detalle(page, url_detalle: str, marca: str, csv_path: Path) -> bool:
     return False
 
 
+def cargar_modelos_desde_csv(ruta_csv: Path, marca: str) -> list[str]:
+    """Lee un CSV (marca, modelo) y devuelve la lista de modelos para la marca indicada.
+    Acepta delimitador coma o punto y coma (scraper_telcel_modelos.py escribe con ;)."""
+    modelos: list[str] = []
+    with open(ruta_csv, encoding="utf-8", newline="") as f:
+        raw = f.read()
+    for delimiter in (";", ","):  # scraper_telcel_modelos.py escribe con ";"
+        f = iter(raw.splitlines())
+        reader = csv.DictReader(f, delimiter=delimiter)
+        rows = list(reader)
+        if not rows:
+            continue
+        first = rows[0]
+        if "modelo" not in first and "marca" not in first:
+            continue
+        for row in rows:
+            m = (row.get("marca") or "").strip()
+            mod = (row.get("modelo") or "").strip()
+            if mod and (not m or m.lower() == marca.lower()):
+                modelos.append(mod)
+        if modelos:
+            return modelos
+    return []
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extrae modelo y precio del comparador Telcel")
     parser.add_argument("--marca", "-m", required=True, help='Marca a buscar (ej. "Apple")')
@@ -89,6 +114,12 @@ def main() -> None:
         default=None,
         help='Modelo concreto (opcional). Si no se pasa, se intentan todos los modelos de la marca.',
     )
+    parser.add_argument(
+        "--csv-modelos",
+        default=None,
+        metavar="ARCHIVO",
+        help='CSV con columnas marca,modelo (salida de scraper_telcel_modelos.py). Itera sobre cada modelo del archivo.',
+    )
     parser.add_argument("--csv", "-o", default=CSV_DEFAULT, help=f"Archivo CSV de salida (default: {CSV_DEFAULT})")
     parser.add_argument("--no-headless", action="store_true", help="Mostrar ventana del navegador (por defecto va en segundo plano)")
     parser.add_argument("--debug", action="store_true", help="Guardar capturas y pausas para depurar")
@@ -96,6 +127,20 @@ def main() -> None:
 
     csv_path = Path(args.csv)
     ensure_csv_header(csv_path)
+
+    # Si se pasó --csv-modelos, cargar lista de modelos desde ese archivo
+    modelos_desde_csv: list[str] | None = None
+    if args.csv_modelos:
+        path_csv_modelos = Path(args.csv_modelos)
+        if not path_csv_modelos.exists():
+            raise FileNotFoundError(f"No se encontró el archivo de modelos: {path_csv_modelos}")
+        modelos_desde_csv = cargar_modelos_desde_csv(path_csv_modelos, args.marca.strip())
+        if not modelos_desde_csv:
+            raise ValueError(
+                f"No hay modelos para la marca '{args.marca}' en {path_csv_modelos}. "
+                "Comprueba que el CSV tenga columnas 'marca' y 'modelo'."
+            )
+        print(f"Modelos a procesar (desde {path_csv_modelos.name}): {len(modelos_desde_csv)}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not args.no_headless)
@@ -283,9 +328,38 @@ def main() -> None:
                 return scrape_detalle(page, page.url, args.marca, csv_path)
             # ---
 
-            if args.modelo:
+            if args.modelo and not modelos_desde_csv:
                 if not seleccionar_modelo_y_extraer(args.modelo):
                     print(f"No se encontró el modelo '{args.modelo}' o el botón 'ver detalles'.")
+            elif modelos_desde_csv:
+                for i, nombre_modelo in enumerate(modelos_desde_csv):
+                    if i > 0:
+                        page.goto(URL_COMPARADOR, wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(2)
+                        compare_item = page.locator(".cx-compare-izq").first
+                        if not compare_item.count():
+                            compare_item = page.locator(".cx-compare-item:not(.cx-compare-item-hide)").first
+                        compare_item.wait_for(state="visible", timeout=5000)
+                        _abrir_dropdown_marca()
+                        time.sleep(1)
+                        panel = page.locator(".ng-dropdown-panel, .ng-select-bottom").first
+                        try:
+                            panel.wait_for(state="visible", timeout=5000)
+                        except Exception:
+                            print(f"  Omitido (no se abrió marca): {nombre_modelo}")
+                            continue
+                        panel.locator(".ng-option").filter(has_text=re.compile(re.escape(marca_buscada), re.I)).first.click(force=True)
+                        time.sleep(1)
+                        marca_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).first
+                        if not marca_trigger.count():
+                            marca_trigger = compare_item.locator("input").first
+                        modelo_trigger = compare_item.get_by_placeholder(re.compile(r"elige\s+una\s+opc", re.I)).nth(1)
+                        if not modelo_trigger.count():
+                            modelo_trigger = compare_item.locator("input").nth(1)
+                    if seleccionar_modelo_y_extraer(nombre_modelo):
+                        pass
+                    else:
+                        print(f"  Omitido (no detalles): {nombre_modelo}")
             else:
                 # Obtener lista de modelos: abrir segundo .ng-select, leer .ng-option del panel
                 for _ in range(3):
