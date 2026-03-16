@@ -34,6 +34,9 @@ playwright install chromium
 Genera un CSV con columnas `marca, modelo` (un renglón por modelo). Sirve como entrada para procesar después con `scraper_telcel.py`.
 
 ```bash
+uv run python scraper_telcel.py --marca "Apple" --csv-modelos modelos_apple_missing.csv --no-headless --csv equipos_telcel_missing.csv
+
+
 uv run python scraper_telcel_modelos.py --marca "Apple" --csv modelos_apple.csv
 
 # Ver el navegador
